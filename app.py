@@ -57,22 +57,16 @@ def load_data():
 
 df = load_data()
 
-tfidf = TfidfVectorizer(stop_words='english')
-df['overview'] = df['overview'].fillna('')
-tfidf_matrix = tfidf.fit_transform(df['overview'])
-cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
-title_to_index = pd.Series(df.index, index=df['title']).drop_duplicates()
+# Apply filters to dataframe
+
+for folder in ["profiles", "feedback", "watchlists"]:
+    os.makedirs(folder, exist_ok=True)
 
 st.sidebar.header("👤 User Profile")
 username = st.sidebar.text_input("Enter your username:")
 profile_file = f"profiles/{username}.json"
-
 feedback_file = f"feedback/{username}_feedback.json"
-
-if not os.path.exists("profiles"):
-    os.makedirs("profiles")
-if not os.path.exists("feedback"):
-    os.makedirs("feedback")
+watchlist_file = f"watchlists/{username}_watchlist.json"
 
 if username:
     if os.path.exists(profile_file):
@@ -86,6 +80,32 @@ if username:
     movie_options = df['title'].sort_values().tolist()
     selected_movies = st.sidebar.multiselect("Liked movies", movie_options, default=profile_data['liked_movies'])
 
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔎 Filters")
+    min_year, max_year = int(df['year'].min()), int(df['year'].max())
+    year_range = st.sidebar.slider("Year Range", min_year, max_year, (2000, max_year))
+    min_runtime, max_runtime = int(df['runtime'].min()), int(df['runtime'].max())
+    runtime_range = st.sidebar.slider("Runtime (minutes)", min_runtime, max_runtime, (60, 180))
+    languages = sorted(df['original_language'].unique())
+    selected_languages = st.sidebar.multiselect("Languages", languages, default=['en'])
+
+    filtered_df = df[
+    (df['year'] >= year_range[0]) & (df['year'] <= year_range[1]) &
+    (df['runtime'] >= runtime_range[0]) & (df['runtime'] <= runtime_range[1]) &
+    (df['original_language'].isin(selected_languages))
+]
+    
+    tfidf = TfidfVectorizer(stop_words='english')
+    filtered_df['overview'] = filtered_df['overview'].fillna('')
+
+    if filtered_df.empty or filtered_df['overview'].str.strip().eq('').all():
+        st.error("No movies match your filters.")
+        st.stop()
+
+    tfidf_matrix = tfidf.fit_transform(filtered_df['overview'])
+    cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+    title_to_index = pd.Series(filtered_df.index, index=filtered_df['title']).drop_duplicates()
+
     profile_data['liked_movies'] = selected_movies
     profile_data['favorite_genres'] = selected_genres
 
@@ -95,11 +115,26 @@ if username:
     st.session_state["genres"] = selected_genres
     st.session_state["liked_movies"] = selected_movies
 
-    tabs = st.tabs(["Explore Movies", "Recommendations", "Movie of the Day", "Insights", "Feedback & Evaluation"])
+        # === 🎲 Surprise Me Button ===
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🎲 Surprise Me")
+    if st.sidebar.button("Give me a random movie!"):
+        surprise = df.sample(1).iloc[0]
+        st.sidebar.markdown(f"**🎬 {surprise['title']} ({surprise['year']})**")
+        st.sidebar.markdown(f"Genres: _{surprise['genres_clean']}_")
+        st.sidebar.markdown(f"⭐ Rating: {surprise['vote_average']}")
+        st.sidebar.markdown(f"🧑‍🎨 Director: {surprise['director']}")
+        if surprise['homepage'] != 'none':
+            st.sidebar.markdown(f"[🌐 Trailer/More Info]({surprise['homepage']})")
+        if surprise['tagline'] != 'none':
+            st.sidebar.markdown(f"_\"{surprise['tagline']}\"_")
+
+
+    tabs = st.tabs(["Explore Movies", "Recommendations", "Movie of the Day", "Watchlist & History", "Insights", "Feedback & Evaluation"])
 
     with tabs[0]:
         st.subheader("📚 Explore the TMDB Dataset")
-        st.dataframe(df[['title', 'genres_clean', 'year', 'original_language', 'vote_average', 'vote_count']], use_container_width=True)
+        st.dataframe(filtered_df[['title', 'genres_clean', 'year', 'original_language', 'vote_average', 'vote_count']], use_container_width=True)
 
     with tabs[1]:
         st.subheader("🤖 Personalized Recommendations")
@@ -108,13 +143,13 @@ if username:
 
         if selected_movies:
             indices = [title_to_index[movie] for movie in selected_movies if movie in title_to_index]
-            sim_scores = sum(cosine_sim[i] for i in indices)
+            sim_scores = np.sum(cosine_sim[indices], axis=0)
             sim_scores = list(enumerate(sim_scores))
             sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
             sim_scores = [i for i in sim_scores if i[0] not in indices]
 
             for i, score in sim_scores[:50]:
-                movie = df.iloc[i]
+                movie = filtered_df.iloc[i]
                 genre_match = sum(1 for genre in selected_genres if genre.strip() in movie['genres_clean'].split(", "))
                 weight = 0.5 * score + 0.3 * (genre_match / len(selected_genres) if selected_genres else 0) + 0.2 * (movie['vote_average'] / 10)
                 recommendations.append((movie['title'], movie['genres_clean'], movie['year'], movie['vote_average'], round(score, 3), round(weight, 3)))
@@ -145,8 +180,8 @@ if username:
             def genre_score(movie_genres):
                 return sum(1 for genre in selected_genres if genre.strip() in movie_genres.split(", "))
 
-            df['genre_score'] = df['genres_clean'].apply(genre_score)
-            filtered = df[df['genre_score'] > 0].sort_values(by=['genre_score', 'vote_average'], ascending=False).head(10)
+            filtered_df['genre_score'] = df['genres_clean'].apply(genre_score)
+            filtered = filtered_df[filtered_df['genre_score'] > 0].sort_values(by=['genre_score', 'vote_average'], ascending=False).head(10)
             st.dataframe(filtered[['title', 'genres_clean', 'year', 'vote_average']], use_container_width=True)
 
         if not selected_movies and not selected_genres:
@@ -154,14 +189,14 @@ if username:
             
 
         st.subheader("🔥 Trending Now")
-        trending = df.sort_values(by='popularity', ascending=False).head(10)
+        trending = filtered_df.sort_values(by='popularity', ascending=False).head(10)
         st.dataframe(trending[['title', 'genres_clean', 'vote_average', 'popularity']], use_container_width=True)
 
         st.subheader("👥 Users Like You Also Liked")
         dummy_users = {f'user{i}': df['title'].sample(5).tolist() for i in range(1, 6)}
         dummy_users[username] = selected_movies
 
-        all_titles = sorted(set(df['title']))
+        all_titles = sorted(set(filtered_df['title']))
         user_movie_matrix = pd.DataFrame(0, index=dummy_users.keys(), columns=all_titles)
         for user, titles in dummy_users.items():
             for title in titles:
@@ -175,9 +210,9 @@ if username:
         liked_by_top_user = user_movie_matrix.loc[top_user]
         liked_titles = liked_by_top_user[liked_by_top_user == 1].index.tolist()
         suggested = [title for title in liked_titles if title not in selected_movies]
-        st.dataframe(df[df['title'].isin(suggested)][['title', 'genres_clean', 'vote_average']].head(5))
+        st.dataframe(filtered_df[filtered_df['title'].isin(suggested)][['title', 'genres_clean', 'vote_average']].head(5))
 
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("📈 Evaluation Dashboard")
         if os.path.exists(feedback_file):
             with open(feedback_file, 'r') as f:
@@ -197,9 +232,9 @@ if username:
         st.markdown(f"**Overview:** {pick['overview']}")
         st.markdown(f"**Rating:** {pick['vote_average']} ⭐")
         if pick['homepage'] != 'none':
-            st.markdown(f"[Watch Trailer or More Info]({pick['homepage']})")
+            st.markdown(f"[**Watch Trailer or More Info**]({pick['homepage']})")
 
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("📊 Visual Insights")
 
         genre_counts = pd.Series(", ".join(df['genres_clean']).split(", ")).value_counts().head(10)
@@ -250,6 +285,31 @@ if username:
             ax7.imshow(wordcloud, interpolation='bilinear')
             ax7.axis("off")
             st.pyplot(fig7)
+
+        with tabs[3]:
+            st.subheader("🎯 Your Watchlist")
+            watchlist = []
+            if os.path.exists(watchlist_file):
+                with open(watchlist_file, 'r') as f:
+                    watchlist = json.load(f)
+            selected_watchlist = st.multiselect("Add movies to your watchlist:", movie_options, default=watchlist, placeholder="Search for movies")
+            if st.button("Add to Watchlist"):
+                with open(watchlist_file, 'w') as f:
+                    json.dump(selected_watchlist, f)
+                st.success("Added to Watchlist!")
+            if selected_watchlist:
+                st.write("📽 Movies in your watchlist:")
+                st.dataframe(filtered_df[filtered_df['title'].isin(selected_watchlist)][['title', 'genres_clean', 'year', 'vote_average']])
+
+            st.subheader("📌 Interaction History")
+            if os.path.exists(feedback_file):
+                with open(feedback_file, 'r') as f:
+                    history_data = json.load(f)
+                st.write("Movies you rated:")
+                history_df = pd.DataFrame(history_data.items(), columns=['Title', 'Your Rating'])
+                st.dataframe(history_df)
+            else:
+                st.info("No rating history yet.")
 
 else:
     st.warning("Please enter a username to use Nova.")
