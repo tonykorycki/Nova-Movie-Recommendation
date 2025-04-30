@@ -65,6 +65,80 @@ def save_user_data(filepath, data):
     except Exception as e:
         return False, str(e)
 
+def collect_user_ratings():
+    """Collect all user ratings from feedback directory
+    
+    Returns:
+    --------
+    dict
+        Dictionary with username as key and another dict of {movie: rating} as value
+    """
+    ratings = {}
+    feedback_dir = "feedback"
+    
+    if os.path.exists(feedback_dir):
+        for filename in os.listdir(feedback_dir):
+            if filename.endswith("_ratings.json"):
+                username = filename.replace("_ratings.json", "")
+                filepath = os.path.join(feedback_dir, filename)
+                
+                try:
+                    with open(filepath, 'r') as f:
+                        user_ratings = json.load(f)
+                        if user_ratings and isinstance(user_ratings, dict):
+                            ratings[username] = user_ratings
+                except Exception as e:
+                    print(f"Error loading ratings for {username}: {e}")
+    
+    return ratings
+
+def get_user_genre_preferences(username, df):
+    """Extract genre preferences from user ratings"""
+    ratings_file = f"feedback/{username}_ratings.json"
+    ratings = load_user_data(ratings_file, {})
+    
+    if not ratings:
+        return []
+    
+    # Get movies the user rated highly (4+ stars)
+    liked_movies = [movie for movie, rating in ratings.items() if rating >= 4]
+    
+    # Get genres from these movies
+    genre_counts = {}
+    for movie in liked_movies:
+        movie_data = df[df['title'] == movie]
+        if not movie_data.empty and 'genres_list' in movie_data.columns:
+            genres = movie_data['genres_list'].iloc[0]
+            if isinstance(genres, list):
+                for genre in genres:
+                    genre_counts[genre] = genre_counts.get(genre, 0) + 1
+    
+    # Return top genres (those that appear in at least 2 liked movies)
+    return [genre for genre, count in genre_counts.items() if count >= 2]
+
+def ensure_recommendation_fields(rec_list):
+    """Ensure all recommendation objects have required fields and proper formats for display"""
+    if rec_list is None:
+        return []
+        
+    for rec in rec_list:
+        # Set default values for any missing keys
+        rec["Title"] = rec.get("Title", "Unknown")
+        rec["Year"] = rec.get("Year", "N/A") 
+        rec["Rating"] = rec.get("Rating", 0.0)
+        rec["Genres"] = rec.get("Genres", "")
+        rec["Similarity"] = rec.get("Similarity", 0.0)
+        rec["Description"] = rec.get("Description", "No description available")
+        
+        # Convert non-string values to strings for safe display
+        for key in rec:
+            if rec[key] is None:
+                rec[key] = "N/A"
+            elif isinstance(rec[key], (int, float)) and key != "Similarity" and key != "Rating":
+                rec[key] = str(rec[key])
+    
+    return rec_list
+
 class PerformanceTracker:
     """Track performance metrics for the app"""
     

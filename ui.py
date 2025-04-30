@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.express as px
 from wordcloud import WordCloud
+from utils import load_user_data
 
 def setup_page():
     """Configure page settings and title"""
@@ -31,18 +32,7 @@ def apply_dark_mode():
     """, unsafe_allow_html=True)
 
 def create_sidebar(df):
-    """Create and render the sidebar with user inputs
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The movie dataframe
-        
-    Returns:
-    --------
-    dict
-        Dictionary containing all sidebar selections
-    """
+    """Create and render the sidebar with user inputs"""
     st.sidebar.header("👤 User Profile")
     username_input = st.sidebar.text_input("Enter your username:")
     
@@ -51,19 +41,28 @@ def create_sidebar(df):
     if dark_mode:
         apply_dark_mode()
     
-    # Extract genre list for selection
-    all_genres = set()
-    for genres in df['genres_list']:
-        for genre in genres:
-            all_genres.add(genre)
-    genres = sorted(all_genres)
-    
-    # Movie options for selection
-    movie_options = df['title'].sort_values().tolist()
-    
-    # User preferences (these will be populated by profile data later)
-    selected_genres = st.sidebar.multiselect("Favorite genres", genres)
-    selected_movies = st.sidebar.multiselect("Liked movies", movie_options)
+    # Only load user stats if username is provided
+    if username_input:
+        # Display user stats
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📊 Your Stats")
+        
+        # Load user data
+        watchlist_file = f"watchlists/{username_input}_watchlist.json"
+        ratings_file = f"feedback/{username_input}_ratings.json"
+        
+        watchlist = load_user_data(watchlist_file, {"to_watch": [], "watched": []})
+        ratings = load_user_data(ratings_file, {})
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.metric("Watched", len(watchlist.get("watched", [])))
+        with col2:
+            st.metric("To Watch", len(watchlist.get("to_watch", [])))
+            
+        if ratings:
+            avg_rating = sum(ratings.values()) / len(ratings)
+            st.sidebar.metric("Avg Rating", f"⭐ {avg_rating:.1f}")
     
     # Filters section
     st.sidebar.markdown("---")
@@ -91,8 +90,8 @@ def create_sidebar(df):
     return {
         'username_input': username_input,
         'dark_mode': dark_mode,
-        'selected_genres': selected_genres,
-        'selected_movies': selected_movies,
+        'selected_genres': [],  # Empty list since we're not collecting this anymore
+        'selected_movies': [],  # Empty list since we're not collecting this anymore
         'year_range': year_range,
         'runtime_range': runtime_range,
         'selected_languages': selected_languages,
@@ -172,38 +171,24 @@ def display_recommendations(recommendations, df, rating_callback=None):
             rating_callback(rating_feedback)
 
 def display_watchlist(watchlist, mark_watched_callback=None, remove_callback=None):
-    """Display user's watchlist
-    
-    Parameters:
-    -----------
-    watchlist : dict
-        Dictionary containing 'to_watch' and 'watched' lists
-    mark_watched_callback : function, optional
-        Callback when "Mark as Watched" is clicked
-    remove_callback : function, optional
-        Callback when "Remove" is clicked
-    """
-    st.subheader("📋 Your Watchlist")
+    """Display user's watchlist"""
+    st.subheader("Movies To Watch")
     
     if not watchlist.get("to_watch"):
-        st.info("Your watchlist is empty. Add some movies to get started!")
+        st.info("Your watchlist is empty. Add movies from search or recommendations!")
         return
     
     # Display movies to watch
     for i, movie in enumerate(watchlist["to_watch"]):
-        col1, col2, col3 = st.columns([5, 1, 1])
+        col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
             st.write(f"{i+1}. {movie}")
-        
-        if mark_watched_callback:
-            with col2:
-                if st.button("✓ Watched", key=f"watched_{i}"):
-                    mark_watched_callback(movie)
-        
-        if remove_callback:
-            with col3:
-                if st.button("🗑️ Remove", key=f"remove_{i}"):
-                    remove_callback(movie)
+        with col2:
+            if st.button("✓ Watched", key=f"watched_{i}") and mark_watched_callback:
+                mark_watched_callback(movie)
+        with col3:
+            if st.button("✖ Remove", key=f"remove_{i}") and remove_callback:
+                remove_callback(movie)
 
 def display_watch_history(watched_list, clear_history_callback=None):
     """Display user's watch history

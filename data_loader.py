@@ -80,7 +80,7 @@ def filter_dataframe(df, year_range, runtime_range, languages, actors=None):
     
     return filtered_df[mask]
 
-def get_top_actors(df, limit=100):
+def get_top_actors(df, limit=1000):
     """
     Extract top actors from the dataframe
     
@@ -101,7 +101,7 @@ def get_top_actors(df, limit=100):
     
     # Process only the first 100 movies for performance
     for cast in df['cast_list'].head(100):
-        for actor in cast[:3]:  # Only use top 3 actors per movie
+        for actor in cast[:5]:  # Only use top 3 actors per movie
             if actor in actor_counts:
                 actor_counts[actor] += 1
             else:

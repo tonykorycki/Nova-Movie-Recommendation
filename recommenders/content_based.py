@@ -142,9 +142,10 @@ class EnhancedContentRecommender(ContentBasedRecommender):
         # Add director (with prefix to distinguish from actor names)
         self.df['combined_content'] += ' director_' + self.df['director'].fillna('').str.replace(' ', '_')
         
-        # Add main cast (first 3 actors)
+        # Add main cast with HIGHER WEIGHT - increase the actor importance
         self.df['combined_content'] += self.df['cast_list'].apply(
-            lambda x: ' ' + ' '.join([f"actor_{actor}" for actor in x[:3]]) if isinstance(x, list) else ''
+            # Adding cast multiple times to increase weight in the similarity calculation
+            lambda x: ' ' + ' '.join([f"actor_{actor}" for actor in x[:3]]*3) if isinstance(x, list) else ''
         )
         
         # Add year information as a feature (binned by decade)
