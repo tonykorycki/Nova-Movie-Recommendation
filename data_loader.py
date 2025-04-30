@@ -33,7 +33,11 @@ def load_data():
         # Convert release_date to year
         merged_df['year'] = pd.to_datetime(merged_df['release_date'], errors='coerce').dt.year
         
-        return merged_df
+        # Prepare DataFrame for caching by handling unhashable types
+        from utils import prepare_df_for_caching
+        cacheable_df = prepare_df_for_caching(merged_df)
+        
+        return cacheable_df
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return pd.DataFrame()

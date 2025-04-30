@@ -139,6 +139,31 @@ def ensure_recommendation_fields(rec_list):
     
     return rec_list
 
+def prepare_df_for_caching(df):
+    """
+    Prepare DataFrame for caching by converting unhashable types to hashable ones
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame to prepare
+    
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame with hashable types
+    """
+    df_copy = df.copy()
+    
+    # Convert list columns to string representation
+    for col in df_copy.columns:
+        if df_copy[col].apply(lambda x: isinstance(x, list)).any():
+            df_copy[col] = df_copy[col].apply(
+                lambda x: "|".join(str(item) for item in x) if isinstance(x, list) else x
+            )
+    
+    return df_copy
+
 class PerformanceTracker:
     """Track performance metrics for the app"""
     

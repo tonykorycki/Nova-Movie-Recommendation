@@ -78,21 +78,7 @@ class CollaborativeFilteringRecommender(BaseRecommender):
         return dummy_users
     
     def create_user_item_matrix(self, user_ratings=None, n_dummy_users=20):
-        """
-        Create user-item matrix from real and dummy user ratings
-        
-        Parameters:
-        -----------
-        user_ratings : dict
-            Dictionary of movie_title -> user rating
-        n_dummy_users : int
-            Number of dummy users to create
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            User-item matrix
-        """
+        """Create user-item matrix with proper data types"""
         # Create dummy users
         dummy_users = self.create_dummy_users(n_dummy_users)
         
@@ -105,17 +91,18 @@ class CollaborativeFilteringRecommender(BaseRecommender):
         for movies in dummy_users.values():
             all_movies.update(movies)
         
-        # Create matrix
-        matrix = pd.DataFrame(0, index=dummy_users.keys(), columns=list(all_movies))
+        # Create matrix with float dtype explicitly
+        matrix = pd.DataFrame(0.0, index=dummy_users.keys(), columns=list(all_movies))
         
-        # Fill matrix with binary interactions
+        # Fill matrix with ratings
         for user, movies in dummy_users.items():
             for movie in movies:
-                # Use ratings if available for current user, otherwise just mark as watched (1)
+                # Use ratings if available for current user, otherwise just mark as watched (1.0)
                 if user == 'current_user' and movie in user_ratings:
-                    matrix.loc[user, movie] = user_ratings[movie]
+                    # Convert to float to prevent dtype warning
+                    matrix.loc[user, movie] = float(user_ratings[movie])
                 else:
-                    matrix.loc[user, movie] = 1
+                    matrix.loc[user, movie] = 1.0
         
         return matrix
     
@@ -468,4 +455,5 @@ def get_recommender(df, recommender_type="user_based", title_to_index=None):
     else:  # Standard collaborative filtering
         recommender = CollaborativeFilteringRecommender(df, title_to_index)
         
+    recommender.fit()
     return recommender

@@ -94,4 +94,6 @@ class PopularMoviesRecommender(BaseRecommender):
 # Factory function to create and return a recommender instance
 def get_recommender(df, recommender_type="basic", title_to_index=None):
     """Create and return a popular movies recommender instance"""
-    return PopularMoviesRecommender(df, title_to_index)
+    recommender = PopularMoviesRecommender(df, title_to_index)
+    # No pre-fitting needed for popular recommender
+    return recommender

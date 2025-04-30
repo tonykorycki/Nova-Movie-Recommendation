@@ -22,98 +22,128 @@ class MatrixFactorizationRecommender(BaseRecommender):
         """
         super().__init__(df, title_to_index)
         self.name = "Matrix Factorization Recommender"
-        self.description = "Uses Singular Value Decomposition to identify latent factors in movies"
+        self.description = "Recommends movies using matrix factorization (SVD)"
         self.user_item_matrix = None
-        self.user_features = None
-        self.item_features = None
-        self.sigma = None
-        self.reconstructed_matrix = None
+        self.user_factors = None
+        self.item_factors = None
+        self.item_bias = None
+        self.global_mean = None
     
-    def create_user_item_matrix(self, user_ratings, n_dummy_users=20):
+    def create_dummy_users(self, n_users=20, n_movies_per_user=10):
         """
-        Create user-item matrix for factorization
+        Create dummy users for demonstration purposes
         
         Parameters:
         -----------
-        user_ratings : dict
-            Dictionary with movie titles as keys and ratings as values
+        n_users : int
+            Number of dummy users to create
+        n_movies_per_user : int
+            Number of movies per user
+            
+        Returns:
+        --------
+        dict
+            Dictionary of user_id -> list of movie titles
+        """
+        dummy_users = {}
+        
+        # Group movies by genre for more realistic user preferences
+        genre_groups = {}
+        for _, row in self.df.iterrows():
+            for genre in row.get('genres_list', []):
+                if genre not in genre_groups:
+                    genre_groups[genre] = []
+                genre_groups[genre].append(row['title'])
+        
+        # Create users with genre-based preferences
+        genres = list(genre_groups.keys())
+        for i in range(n_users):
+            # Give each user 1-3 preferred genres
+            n_genres = min(3, np.random.randint(1, 4))
+            user_genres = np.random.choice(genres, n_genres, replace=False)
+            
+            # Get movies from those genres
+            user_movies = []
+            for genre in user_genres:
+                n_from_genre = n_movies_per_user // len(user_genres)
+                if genre in genre_groups and len(genre_groups[genre]) >= n_from_genre:
+                    genre_movies = np.random.choice(genre_groups[genre], n_from_genre, replace=False)
+                    user_movies.extend(genre_movies)
+            
+            # Add some random movies if needed
+            remaining = n_movies_per_user - len(user_movies)
+            if remaining > 0:
+                random_movies = np.random.choice(self.df['title'].values, remaining, replace=False)
+                user_movies.extend(random_movies)
+                
+            dummy_users[f'user{i+1}'] = list(set(user_movies))
+        
+        return dummy_users
+
+    def create_user_item_matrix(self, user_ratings=None, n_dummy_users=20):
+        """
+        Create user-item matrix for matrix factorization
+        
+        Parameters:
+        -----------
+        user_ratings : dict, optional
+            Dictionary of movie_title -> user rating
         n_dummy_users : int
             Number of dummy users to create
             
         Returns:
         --------
         scipy.sparse.csr_matrix
-            User-item sparse matrix
+            User-item matrix
         """
-        # Create dummy users first - group by genre for realism
-        genres = {}
-        for _, row in self.df.iterrows():
-            for genre in row.get('genres_list', []):
-                if genre not in genres:
-                    genres[genre] = []
-                genres[genre].append(row['title'])
+        # Create dummy users
+        dummy_users = self.create_dummy_users(n_dummy_users)
         
-        # Create dummy users with genre preferences
-        all_genres = list(genres.keys())
-        ratings = []
+        # Add current user if ratings provided
+        if user_ratings:
+            dummy_users['current_user'] = list(user_ratings.keys())
         
-        # Create row indices, column indices and data for sparse matrix
+        # Get all unique movies
+        all_movies = set()
+        for movies in dummy_users.values():
+            all_movies.update(movies)
+        
+        # Create mappings for users and items
+        users = list(dummy_users.keys())
+        movies = list(all_movies)
+        
+        self.user_mapping = {user: i for i, user in enumerate(users)}
+        self.item_mapping = {movie: i for i, movie in enumerate(movies)}
+        
+        # Prepare data for sparse matrix
         row_ind = []
         col_ind = []
         data = []
         
-        # Add dummy users (users 0 to n_dummy_users-1)
-        for user_id in range(n_dummy_users):
-            # Select 1-3 preferred genres for this user
-            n_genres = np.random.randint(1, 4)
-            if len(all_genres) > n_genres:
-                user_genres = np.random.choice(all_genres, n_genres, replace=False)
-                
-                # Rate 10-20 movies from those genres
-                for genre in user_genres:
-                    if genre in genres:
-                        # How many movies to rate from this genre
-                        n_movies = min(len(genres[genre]), np.random.randint(5, 10))
-                        
-                        if n_movies > 0:
-                            # Sample movies from this genre
-                            genre_movies = np.random.choice(genres[genre], n_movies, replace=False)
-                            
-                            # Add ratings (3.5-5.0 for preferred genres)
-                            for movie in genre_movies:
-                                if movie in self.title_to_index.index:
-                                    movie_idx = self.title_to_index[movie]
-                                    rating = np.random.uniform(3.5, 5.0)
-                                    
-                                    row_ind.append(user_id)
-                                    col_ind.append(movie_idx)
-                                    data.append(rating)
-                
-                # Add some random low-rated movies
-                n_random = np.random.randint(5, 15)
-                random_movies = np.random.choice(self.df['title'].values, n_random, replace=False)
-                for movie in random_movies:
-                    if movie in self.title_to_index.index:
-                        movie_idx = self.title_to_index[movie]
-                        # Low rating (1.0-3.0)
-                        rating = np.random.uniform(1.0, 3.0)
-                        
-                        row_ind.append(user_id)
-                        col_ind.append(movie_idx)
-                        data.append(rating)
+        for user, movies_list in dummy_users.items():
+            user_idx = self.user_mapping[user]
+            for movie in movies_list:
+                if movie in self.item_mapping:
+                    movie_idx = self.item_mapping[movie]
+                    
+                    # Use actual ratings if available for current user
+                    if user == 'current_user' and user_ratings and movie in user_ratings:
+                        rating = float(user_ratings[movie])
+                    else:
+                        # Generate a synthetic rating (3-5 range for liked movies)
+                        rating = np.random.uniform(3.0, 5.0)
+                    
+                    row_ind.append(user_idx)
+                    col_ind.append(movie_idx)
+                    data.append(rating)
         
-        # Add the current user (as the last user)
-        current_user_id = n_dummy_users
-        for movie, rating in user_ratings.items():
-            if movie in self.title_to_index.index:
-                movie_idx = self.title_to_index[movie]
-                
-                row_ind.append(current_user_id)
-                col_ind.append(movie_idx)
-                data.append(rating)
+        # Convert to numpy arrays
+        row_ind = np.array(row_ind, dtype=np.int32)
+        col_ind = np.array(col_ind, dtype=np.int32)
+        data = np.array(data, dtype=np.float32)
         
         # Create sparse matrix
-        shape = (n_dummy_users + 1, len(self.df))
+        shape = (len(users), len(movies))
         matrix = sp.csr_matrix((data, (row_ind, col_ind)), shape=shape)
         
         return matrix
@@ -150,9 +180,8 @@ class MatrixFactorizationRecommender(BaseRecommender):
             item_features = svd.fit_transform(self.user_item_matrix.T)
             user_features = (self.user_item_matrix @ item_features) @ np.diag(1/svd.singular_values_)
             
-            self.user_features = user_features
-            self.item_features = item_features
-            self.sigma = svd.singular_values_
+            self.user_factors = user_features
+            self.item_factors = item_features
         else:
             # Fill missing values with zeros for SVD
             dense_matrix = self.user_item_matrix.toarray()
@@ -162,13 +191,8 @@ class MatrixFactorizationRecommender(BaseRecommender):
             u, sigma, vt = svds(dense_matrix, k=n_factors)
             
             # Store the decomposition
-            self.user_features = u
-            self.item_features = vt.T
-            self.sigma = sigma
-        
-        # Reconstruct matrix for predictions
-        sigma_diag = np.diag(self.sigma)
-        self.reconstructed_matrix = self.user_features @ sigma_diag @ self.item_features.T
+            self.user_factors = u
+            self.item_factors = vt.T
         
         return self
     
@@ -188,29 +212,23 @@ class MatrixFactorizationRecommender(BaseRecommender):
         list
             List of recommended movie dictionaries
         """
-        if self.reconstructed_matrix is None:
+        if self.user_factors is None or self.item_factors is None:
             # Create user ratings from liked movies
             user_ratings = {movie: 5.0 for movie in liked_movies}
             self.fit(user_ratings)
             
-        if self.reconstructed_matrix is None:
+        if self.user_factors is None or self.item_factors is None:
             return []
         
         # Get the user's predicted ratings
         # Last user is the current user
-        user_id = self.reconstructed_matrix.shape[0] - 1
-        user_predictions = self.reconstructed_matrix[user_id]
-        
-        # Create a mapping from movie index to original dataframe index
-        movie_mapping = {}
-        for title, idx in self.title_to_index.items():
-            movie_mapping[idx] = title
+        user_id = len(self.user_mapping) - 1
+        user_predictions = self.user_factors[user_id] @ self.item_factors.T
         
         # Create a list of (movie_idx, predicted_rating)
         predictions = []
-        for movie_idx in range(len(user_predictions)):
-            movie_title = movie_mapping.get(movie_idx)
-            if movie_title and movie_title not in liked_movies:
+        for movie, movie_idx in self.item_mapping.items():
+            if movie not in liked_movies:
                 predictions.append((movie_idx, user_predictions[movie_idx]))
         
         # Sort by predicted rating
@@ -239,4 +257,5 @@ def get_recommender(df, title_to_index=None):
     MatrixFactorizationRecommender
         Initialized recommender
     """
-    return MatrixFactorizationRecommender(df, title_to_index)
+    recommender = MatrixFactorizationRecommender(df, title_to_index)
+    return recommender  # Don't pre-fit the model to avoid issues

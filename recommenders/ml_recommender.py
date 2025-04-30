@@ -73,7 +73,9 @@ class MLRecommender(BaseRecommender):
             weights = weights / weights.sum()  # Normalize
             
             # Compute user vector as weighted combination of movie features
-            self.user_vectors[username] = user_movies_features.multiply(weights.reshape(-1, 1)).mean(axis=0)
+            # Convert to numpy array to avoid np.matrix deprecation warning
+            weighted_features = user_movies_features.multiply(weights.reshape(-1, 1))
+            self.user_vectors[username] = np.asarray(weighted_features.mean(axis=0)).flatten()
         
         # Process "not interested" feedback if provided
         if user_feedback:
@@ -100,7 +102,8 @@ class MLRecommender(BaseRecommender):
                 # Adjust user vector to move away from disliked movies
                 # Use a smaller weight for negative feedback to avoid over-correction
                 negative_weight = 0.3
-                negative_vector = disliked_features.mean(axis=0) * negative_weight
+                # Convert to numpy array to avoid np.matrix deprecation warning
+                negative_vector = np.asarray(disliked_features.mean(axis=0)).flatten() * negative_weight
                 
                 # Update user vector (move away from disliked items)
                 self.user_vectors[username] = self.user_vectors[username] - negative_vector
@@ -130,6 +133,8 @@ class MLRecommender(BaseRecommender):
         # If we have the user's vector, use it
         if user_id and user_id in self.user_vectors:
             user_vector = self.user_vectors[user_id]
+            # Ensure user_vector is correctly shaped for cosine_similarity
+            user_vector = user_vector.reshape(1, -1)
             similarities = cosine_similarity(user_vector, self.movie_features)[0]
         # Otherwise use liked_movies to compute recommendation
         elif liked_movies:
@@ -142,7 +147,7 @@ class MLRecommender(BaseRecommender):
                 
             # Compute similarity
             liked_features = self.movie_features[liked_indices]
-            user_profile = liked_features.mean(axis=0)
+            user_profile = np.asarray(liked_features.mean(axis=0)).flatten().reshape(1, -1)
             similarities = cosine_similarity(user_profile, self.movie_features)[0]
         else:
             return []
@@ -171,6 +176,7 @@ class MLRecommender(BaseRecommender):
         
         return recommendations
 
-def get_recommender(df, title_to_index):
+def get_recommender(df, title_to_index=None):
     """Factory function to create and return a MLRecommender instance"""
-    return MLRecommender(df, title_to_index)
+    recommender = MLRecommender(df, title_to_index)
+    return recommender

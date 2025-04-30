@@ -1,280 +1,294 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-import time
 import json
 import os
+import time
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 class RecommenderEvaluator:
-    """Framework for evaluating and comparing recommender systems"""
+    """Class to evaluate and compare recommender systems"""
     
-    def __init__(self, df, test_size=0.2, random_state=42):
-        """Initialize evaluator with dataset
+    def __init__(self, df):
+        """
+        Initialize evaluator
         
         Parameters:
         -----------
         df : pandas.DataFrame
             Movie dataframe
-        test_size : float
-            Proportion of data to use for testing
-        random_state : int
-            Random seed for reproducibility
         """
         self.df = df
-        self.test_size = test_size
-        self.random_state = random_state
         self.results = {}
-        self.metrics = ["precision", "recall", "f1_score", "hit_rate", "coverage", "diversity", "runtime"]
     
-    def _split_user_data(self, ratings, user_id=None):
-        """Split a user's ratings into train and test sets
-        
-        Parameters:
-        -----------
-        ratings : dict
-            Dict of {movie: rating} for a user
-        user_id : str, optional
-            User ID for tracking
-        
-        Returns:
-        --------
-        train_ratings, test_ratings : tuple of dicts
-            Train and test rating dictionaries
+    def prepare_data(self, user_ratings, min_ratings=5):
         """
-        # Convert ratings to list of (movie, rating) tuples
-        rating_items = list(ratings.items())
-        
-        # If user has very few ratings, use leave-one-out
-        if len(rating_items) <= 5:
-            if len(rating_items) <= 1:
-                return ratings, {}  # Can't split if only one rating
-            
-            train = dict(rating_items[:-1])
-            test = dict([rating_items[-1]])
-            return train, test
-        
-        # Otherwise do regular train_test_split
-        train_items, test_items = train_test_split(
-            rating_items,
-            test_size=self.test_size,
-            random_state=self.random_state
-        )
-        
-        train = dict(train_items)
-        test = dict(test_items)
-        
-        return train, test
-    
-    def prepare_data(self, all_ratings, min_ratings=5):
-        """Prepare train/test splits for all users
+        Create train/test splits from user ratings
         
         Parameters:
         -----------
-        all_ratings : dict
-            Dictionary with username as key and another dict of {movie: rating} as value
+        user_ratings : dict
+            Dictionary of user_id -> dict(movie_title -> rating)
         min_ratings : int
-            Minimum number of ratings required for a user to be included
-            
+            Minimum number of ratings required for a user
+        
         Returns:
         --------
         dict
-            Dictionary with username as key and tuple of (train_ratings, test_ratings) as value
+            Dictionary of user_id -> (train_ratings, test_ratings)
         """
-        user_splits = {}
+        splits = {}
         
-        for username, ratings in all_ratings.items():
-            if len(ratings) >= min_ratings:
-                train, test = self._split_user_data(ratings, username)
-                if train and test:  # Only include if both train and test have data
-                    user_splits[username] = (train, test)
+        for username, ratings in user_ratings.items():
+            if len(ratings) < min_ratings:
+                continue
+            
+            # Convert to list of (movie, rating) tuples
+            ratings_list = list(ratings.items())
+            
+            # Shuffle ratings
+            np.random.seed(42)  # for reproducibility
+            np.random.shuffle(ratings_list)
+            
+            # Split into train (80%) and test (20%)
+            split_idx = int(0.8 * len(ratings_list))
+            train = dict(ratings_list[:split_idx])
+            test = dict(ratings_list[split_idx:])
+            
+            splits[username] = (train, test)
         
-        return user_splits
+        return splits
     
-    def evaluate_recommender(self, recommender, user_splits, n=10, name=None):
-        """Evaluate a recommender system on split user data
+    def evaluate_for_user(self, recommender, train_ratings, test_ratings, n=10, name="Recommender"):
+        """
+        Evaluate a recommender for a single user
         
         Parameters:
         -----------
         recommender : BaseRecommender
-            Recommender to evaluate
-        user_splits : dict
-            Dictionary from prepare_data with train/test splits
+            Recommender instance to evaluate
+        train_ratings : dict
+            Dictionary of movie_title -> rating for training
+        test_ratings : dict
+            Dictionary of movie_title -> rating for testing
         n : int
             Number of recommendations to generate
-        name : str, optional
-            Name to use for this evaluation run
-            
+        name : str
+            Name of the recommender
+        
         Returns:
         --------
         dict
-            Dictionary of evaluation metrics
+            Evaluation metrics for this user
         """
-        # Initialize metrics
-        total_precision = 0
-        total_recall = 0
-        total_hit_rate = 0
-        all_recommendations = set()
-        diversity_scores = []
-        runtimes = []
-        
-        # Get name of recommender if not specified
-        if name is None:
-            name = recommender.name
-        
-        num_users = len(user_splits)
-        
-        # Evaluate for each user
-        for username, (train_ratings, test_ratings) in user_splits.items():
-            # Convert ratings to a list of liked movies
-            liked_movies = list(train_ratings.keys())
+        try:
+            # Reset recommender for this user
+            recommender.__init__(self.df, None)
             
-            # Time the recommendation generation
+            # Time the recommendation process
             start_time = time.time()
             
-            # Generate recommendations - different recommenders might need different parameters
-            try:
-                if hasattr(recommender, 'fit'):
-                    # Some recommenders need to be fit with the training data
-                    recommender.fit(train_ratings)
-                
-                # Generate recommendations - handle different parameter requirements
-                if "user_id" in recommender.recommend.__code__.co_varnames:
-                    recommendations = recommender.recommend(liked_movies, n=n, user_id=username)
-                else:
-                    recommendations = recommender.recommend(liked_movies, n=n)
-                
-                runtime = time.time() - start_time
-                runtimes.append(runtime)
+            # Generate recommendations based on train set
+            liked_movies = [movie for movie, rating in train_ratings.items() if rating >= 3]
             
-                # Extract just the movie titles from recommendations
-                rec_titles = [r["Title"] for r in recommendations]
-                
-                # Update coverage tracking
-                all_recommendations.update(rec_titles)
-                
-                # Calculate recommendation diversity (unique genres)
-                unique_genres = set()
-                for title in rec_titles:
-                    movie_data = self.df[self.df['title'] == title]
-                    if not movie_data.empty and 'genres_list' in movie_data.columns:
-                        genres = movie_data['genres_list'].iloc[0]
-                        if isinstance(genres, list):
-                            unique_genres.update(genres)
-                
-                diversity = len(unique_genres) / max(1, len(rec_titles))
-                diversity_scores.append(diversity)
-                
-                # Calculate precision and recall
-                test_set = set(test_ratings.keys())
-                recommended_set = set(rec_titles)
-                
-                # Find the intersection of recommended items and test items
-                relevant_retrieved = len(test_set.intersection(recommended_set))
-                
-                # Calculate metrics
-                precision = relevant_retrieved / max(1, len(recommended_set))
-                recall = relevant_retrieved / max(1, len(test_set))
-                
-                # Hit rate (did we recommend at least one relevant item?)
-                hit_rate = 1 if relevant_retrieved > 0 else 0
-                
-                # Accumulate metrics
-                total_precision += precision
-                total_recall += recall
-                total_hit_rate += hit_rate
+            # Skip if no liked movies in training set
+            if not liked_movies:
+                return {}
             
-            except Exception as e:
-                print(f"Error evaluating for user {username}: {str(e)}")
-                continue
-        
-        # Calculate final metrics
-        avg_precision = total_precision / num_users if num_users > 0 else 0
-        avg_recall = total_recall / num_users if num_users > 0 else 0
-        avg_hit_rate = total_hit_rate / num_users if num_users > 0 else 0
-        
-        # F1 score
-        avg_f1 = 2 * (avg_precision * avg_recall) / (avg_precision + avg_recall) if (avg_precision + avg_recall) > 0 else 0
-        
-        # Coverage - what percentage of all movies does the recommender cover?
-        total_movies = len(self.df)
-        coverage = len(all_recommendations) / total_movies
-        
-        # Average diversity
-        avg_diversity = sum(diversity_scores) / len(diversity_scores) if diversity_scores else 0
-        
-        # Average runtime
-        avg_runtime = sum(runtimes) / len(runtimes) if runtimes else 0
-        
-        # Compile results
-        results = {
-            "precision": avg_precision,
-            "recall": avg_recall,
-            "f1_score": avg_f1,
-            "hit_rate": avg_hit_rate,
-            "coverage": coverage,
-            "diversity": avg_diversity,
-            "runtime": avg_runtime
-        }
-        
-        # Store results
-        self.results[name] = results
-        
-        return results
+            # Get recommendations
+            recommendations = recommender.recommend(liked_movies, n=n)
+            
+            runtime = time.time() - start_time
+            
+            # Extract recommended movie titles
+            rec_titles = [r.get('Title', '') for r in recommendations if r.get('Title')]
+            
+            # Consider movies with ratings >= 3 as relevant in test set
+            relevant = [movie for movie, rating in test_ratings.items() if rating >= 3]
+            
+            # Calculate precision and recall
+            true_positives = len(set(rec_titles) & set(relevant))
+            
+            precision = true_positives / len(rec_titles) if rec_titles else 0
+            recall = true_positives / len(relevant) if relevant else 0
+            
+            # Calculate F1 score
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+            
+            # Calculate hit rate (1 if at least one relevant item is recommended)
+            hit_rate = 1 if true_positives > 0 else 0
+            
+            # Calculate coverage (proportion of movies that can be recommended)
+            # This is an approximation since we only have a sample
+            all_movies = set(self.df['title'])
+            coverage = len(set(rec_titles)) / len(all_movies) if all_movies else 0
+            
+            # Calculate diversity (average number of different genres)
+            genre_sets = []
+            for title in rec_titles:
+                movie_data = self.df[self.df['title'] == title]
+                if not movie_data.empty and 'genres_list' in movie_data.columns:
+                    genres = movie_data.iloc[0].get('genres_list', [])
+                    if isinstance(genres, list):
+                        genre_sets.append(set(genres))
+            
+            diversity = len(set().union(*genre_sets)) if genre_sets else 0
+            
+            # Return metrics
+            return {
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "hit_rate": hit_rate,
+                "coverage": coverage,
+                "diversity": diversity,
+                "runtime": runtime
+            }
+        except Exception as e:
+            print(f"Error evaluating {name} for user: {str(e)}")
+            return {}
     
-    def save_results(self, filename="recommender_evaluation.json"):
-        """Save evaluation results to a file"""
-        os.makedirs("evaluation", exist_ok=True)
-        filepath = os.path.join("evaluation", filename)
-        
-        with open(filepath, 'w') as f:
-            json.dump(self.results, f, indent=2)
-        
-        return filepath
-    
-    def plot_comparison(self, metrics=None):
-        """Plot comparison of recommenders
+    def evaluate_recommender(self, recommender, user_splits, n=10, name="Recommender"):
+        """
+        Evaluate a recommender across multiple users
         
         Parameters:
         -----------
-        metrics : list, optional
-            List of metrics to compare. If None, uses all metrics.
+        recommender : BaseRecommender
+            Recommender instance to evaluate
+        user_splits : dict
+            Dictionary of user_id -> (train_ratings, test_ratings)
+        n : int
+            Number of recommendations to generate
+        name : str
+            Name of the recommender
+        
+        Returns:
+        --------
+        dict
+            Average evaluation metrics across users
         """
-        if not self.results:
-            print("No evaluation results available")
-            return
+        # Initialize metrics
+        metrics = {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1_score": 0.0,
+            "hit_rate": 0.0,
+            "coverage": 0.0,
+            "diversity": 0,
+            "runtime": 0.0
+        }
         
-        if metrics is None:
-            metrics = self.metrics
+        valid_users = 0
         
-        # Filter to only existing metrics
-        metrics = [m for m in metrics if m in self.metrics]
+        # Evaluate for each user
+        for username, (train, test) in user_splits.items():
+            try:
+                user_metrics = self.evaluate_for_user(
+                    recommender, train, test, n=n, name=name
+                )
+                
+                if not user_metrics:
+                    continue
+                
+                # Accumulate metrics
+                for key in metrics:
+                    metrics[key] += user_metrics.get(key, 0)
+                
+                valid_users += 1
+            except Exception as e:
+                print(f"Error evaluating {name} for user {username}: {str(e)}")
         
-        # Number of recommenders and metrics
-        n_recommenders = len(self.results)
-        n_metrics = len(metrics)
+        # Calculate averages
+        if valid_users > 0:
+            for key in metrics:
+                metrics[key] /= valid_users
         
-        # Prepare plot
-        plt.figure(figsize=(12, 8))
+        # Store results
+        self.results[name] = metrics
         
-        # Draw bars for each recommender and metric
-        bar_width = 0.8 / n_recommenders
+        return metrics
+    
+    def save_results(self):
+        """
+        Save evaluation results to a JSON file
         
-        for i, (name, results) in enumerate(self.results.items()):
-            values = [results.get(metric, 0) for metric in metrics]
-            positions = np.arange(n_metrics) + i * bar_width
+        Returns:
+        --------
+        str
+            Path to the saved file
+        """
+        os.makedirs("evaluation", exist_ok=True)
+        results_file = os.path.join("evaluation", "recommender_evaluation.json")
+        with open(results_file, "w") as f:
+            json.dump(self.results, f, indent=2)
+        return results_file
+    
+    def plot_comparison(self, results=None):
+        """
+        Create a comparison plot of recommenders
+        
+        Parameters:
+        -----------
+        results : dict, optional
+            Results dictionary to use, defaults to self.results
             
-            plt.bar(positions, values, width=bar_width, label=name)
+        Returns:
+        --------
+        matplotlib.pyplot
+            Plot object
+        """
+        if results is None:
+            results = self.results
         
-        # Set labels and title
-        plt.xlabel("Metric")
-        plt.ylabel("Score")
-        plt.title("Recommender System Comparison")
-        plt.xticks(np.arange(n_metrics) + (n_recommenders - 1) * bar_width / 2, metrics)
-        plt.legend()
+        if not results:
+            raise ValueError("No results available for plotting")
         
-        # Show grid
-        plt.grid(True, linestyle='--', alpha=0.7)
+        # Create a table of metrics for all recommenders
+        recommender_names = list(results.keys())
+        metrics = ["precision", "recall", "f1_score", "hit_rate", "coverage", "diversity"]
+        
+        # Create a dataframe for the plot
+        data = []
+        for metric in metrics:
+            metric_values = [results[name].get(metric, 0) for name in recommender_names]
+            data.append(metric_values)
+        
+        # Create plot
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Set position of bars on x-axis
+        x = np.arange(len(metrics))
+        width = 0.15  # Width of bars
+        
+        # Create bars
+        for i, name in enumerate(recommender_names):
+            values = [results[name].get(metric, 0) for metric in metrics]
+            ax.bar(x + i*width - (len(recommender_names)-1)*width/2, values, width, label=name)
+        
+        # Add labels and title
+        ax.set_ylabel('Score')
+        ax.set_title('Recommender System Comparison')
+        ax.set_xticks(x)
+        ax.set_xticklabels(metrics)
+        ax.legend()
+        
+        # Ensure y-axis starts at 0
+        ax.set_ylim(bottom=0)
+        
+        # Add value labels on bars
+        for i, name in enumerate(recommender_names):
+            for j, metric in enumerate(metrics):
+                value = results[name].get(metric, 0)
+                ax.text(
+                    j + i*width - (len(recommender_names)-1)*width/2,
+                    value + 0.01,
+                    f"{value:.2f}",
+                    ha='center',
+                    va='bottom',
+                    rotation=90,
+                    fontsize=8
+                )
         
         plt.tight_layout()
         return plt

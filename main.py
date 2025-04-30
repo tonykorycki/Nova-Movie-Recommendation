@@ -59,14 +59,24 @@ def main():
     if dark_mode:
         ui.apply_dark_mode()
     
-    # Set file paths
-    username = sanitize_username(username_input)
-    profile_file = f"profiles/{username}.json"
-    feedback_file = f"feedback/{username}_feedback.json"
-    watchlist_file = f"watchlists/{username}_watchlist.json"
-    
     # Process user data if username is provided
+    username = sanitize_username(username_input)
     if username:
+        # Set file paths
+        profile_file = f"profiles/{username}.json"
+        feedback_file = f"feedback/{username}_movie_feedback.json"
+        watchlist_file = f"watchlists/{username}_watchlist.json"
+        
+        # Check if this is a new user
+        profile_data = load_user_data(profile_file, {"liked_movies": [], "favorite_genres": []})
+        
+        # If this is a new user or onboarding is not complete, run onboarding
+        if not profile_data.get("onboarding_complete", False):
+            onboarding_complete = onboard_new_user(username, df)
+            if not onboarding_complete:
+                return  # Stop here until onboarding is complete
+        
+        # Continue with the normal app flow once onboarding is complete...
         # Load or create user profile
         profile_data = load_user_data(
             profile_file, 
@@ -1105,6 +1115,206 @@ def main():
             with col3:
                 genres_count = len(set().union(*df['genres_list'].dropna()))
                 st.metric("Unique Genres", genres_count)
+
+# Add this function to handle new user onboarding
+
+def onboard_new_user(username, df):
+    """Onboard a new user with initial movie ratings
+    
+    This function presents 25 movies (a mix of popular and diverse films) for the
+    user to rate, helping to build an initial profile for better recommendations.
+    """
+    st.title("🎬 Welcome to Nova!")
+    st.markdown("""
+    ### Let's get to know your movie taste
+    
+    Rate these 25 movies to get started with personalized recommendations.
+    If you haven't seen a movie, just click "Haven't seen it" to move on.
+    """)
+    
+    # Load or create ratings file
+    ratings_file = f"feedback/{username}_ratings.json"
+    ratings_data = load_user_data(ratings_file, {})
+    
+    # Load or create watchlist
+    watchlist_file = f"watchlists/{username}_watchlist.json"
+    watchlist_data = load_user_data(watchlist_file, {"to_watch": [], "watched": []})
+    
+    # Create a more balanced set of movies (popular + some diverse picks)
+    if 'onboarding_movies' not in st.session_state:
+        diverse_movies = []
+        
+        # 1. Start with highly popular mainstream movies (10 movies)
+        blockbusters = df[(df['vote_average'] >= 7.0) & 
+                           (df['vote_count'] >= 2500) & 
+                           (df['popularity'] >= 80)]
+        if not blockbusters.empty:
+            diverse_movies.extend(blockbusters.sample(min(10, len(blockbusters)))['title'].tolist())
+        
+        # 2. Add some critically acclaimed films that are still well-known (5 movies)
+        acclaimed = df[(df['vote_average'] >= 8.0) & 
+                        (df['vote_count'] >= 500) & 
+                        (df['vote_count'] <= 2500)]
+        if not acclaimed.empty:
+            diverse_movies.extend(acclaimed.sample(min(5, len(acclaimed)))['title'].tolist())
+        
+        # 3. Add a few international films that gained mainstream attention (3 movies)
+        international = df[(df['original_language'] != 'en') & 
+                            (df['vote_average'] >= 7.5) &
+                            (df['vote_count'] >= 300)]
+        if not international.empty:
+            diverse_movies.extend(international.sample(min(3, len(international)))['title'].tolist())
+        
+        # 4. Add classics from different decades (4 movies)
+        classics_decades = [(1960, 1979), (1980, 1999)]
+        for start, end in classics_decades:
+            classics = df[(df['year'] >= start) & (df['year'] <= end) & 
+                           (df['vote_average'] >= 7.5) &
+                           (df['vote_count'] >= 500)]
+            if not classics.empty:
+                diverse_movies.extend(classics.sample(min(2, len(classics)))['title'].tolist())
+        
+        # 5. Add a small selection of hidden gems (3 movies)
+        hidden_gems = df[(df['vote_average'] >= 7.5) & 
+                           (df['vote_count'] >= 100) & 
+                           (df['vote_count'] <= 300)]
+        if not hidden_gems.empty:
+            diverse_movies.extend(hidden_gems.sample(min(3, len(hidden_gems)))['title'].tolist())
+        
+        # Remove duplicates and limit to 25
+        diverse_movies = list(dict.fromkeys(diverse_movies))[:25]
+        
+        # If we still don't have 25, fill with more popular movies
+        if len(diverse_movies) < 25:
+            more_popular = df[(df['vote_average'] >= 6.5) & (df['vote_count'] >= 500)]
+            # Exclude movies already in our list
+            more_popular = more_popular[~more_popular['title'].isin(diverse_movies)]
+            # Add enough to reach 25
+            if not more_popular.empty:
+                diverse_movies.extend(more_popular.sample(min(25 - len(diverse_movies), len(more_popular)))['title'].tolist())
+        
+        # Shuffle the list for better user experience
+        import random
+        random.seed(42)  # For reproducibility
+        random.shuffle(diverse_movies)
+        
+        # Store the movie list in session state so it doesn't change between interactions
+        st.session_state.onboarding_movies = diverse_movies
+    
+    # Use the stored movie list
+    diverse_movies = st.session_state.onboarding_movies
+    
+    # Initialize session state to track progress if not already present
+    if 'onboarding_index' not in st.session_state:
+        st.session_state.onboarding_index = 0
+        st.session_state.onboarded_count = 0
+    
+    # Calculate progress
+    total_movies = len(diverse_movies)
+    current_index = st.session_state.onboarding_index
+    
+    # Check if we've reached the end
+    if current_index >= total_movies:
+        st.success("🎉 You've completed the onboarding process!")
+        st.markdown(f"You've rated {st.session_state.onboarded_count} movies. Now you can explore personalized recommendations!")
+        
+        # Reset onboarding state and mark as completed
+        del st.session_state.onboarding_index
+        del st.session_state.onboarded_count
+        del st.session_state.onboarding_movies
+        
+        # Create a profile file to mark onboarding as completed
+        profile_file = f"profiles/{username}.json"
+        profile_data = load_user_data(profile_file, {"liked_movies": [], "favorite_genres": []})
+        profile_data['onboarding_complete'] = True
+        save_user_data(profile_file, profile_data)
+        
+        # Add a button to continue to the main app
+        if st.button("Continue to Nova"):
+            st.rerun()
+        
+        return True
+    
+    # Show progress bar
+    progress = current_index / total_movies
+    st.progress(progress)
+    st.caption(f"Movie {current_index + 1} of {total_movies}")
+    
+    # Get current movie to rate
+    current_movie = diverse_movies[current_index]
+    
+    # Display movie details for rating
+    movie_data = df[df['title'] == current_movie]
+    
+    if not movie_data.empty:
+        movie = movie_data.iloc[0]
+        
+        # Create two columns
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.subheader(movie['title'])
+            st.write(f"**Year:** {movie.get('year', 'N/A')}")
+            st.write(f"**Rating:** {movie.get('vote_average', 'N/A')}⭐")
+            st.write(f"**Genres:** {movie.get('genres_clean', 'N/A')}")
+            st.write(f"**Director:** {movie.get('director', 'N/A')}")
+            if movie.get('original_language') != 'en':
+                st.write(f"**Language:** {movie.get('original_language', 'N/A')}")
+        
+        with col2:
+            st.write("**Overview:**")
+            st.write(movie.get('overview', 'No overview available'))
+            
+            # Add popularity indicator so users can see if it's mainstream or not
+            popularity_level = "Blockbuster" if movie.get('popularity', 0) > 80 else (
+                              "Popular" if movie.get('popularity', 0) > 40 else 
+                              "Indie/Lesser Known")
+            vote_count = movie.get('vote_count', 0)
+            st.caption(f"{popularity_level} • {int(vote_count):,} ratings")
+        
+        # Rating options with improved UI
+        st.markdown("### Have you seen this movie?")
+        
+        # Display rating slider 
+        rating = st.slider("Your rating:", 1.0, 5.0, 3.0, 0.5, key=f"rating_{current_index}")
+        
+        # Navigation buttons
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        # Haven't seen it button
+        with col1:
+            if st.button("Haven't seen it", key=f"not_seen_{current_index}"):
+                # Move to next movie without saving a rating
+                st.session_state.onboarding_index += 1
+                st.rerun()
+        
+        # Previous button - in middle to avoid accidental clicks
+        with col2:
+            if current_index > 0:
+                if st.button("Previous", key=f"prev_{current_index}"):
+                    st.session_state.onboarding_index -= 1
+                    st.rerun()
+        
+        # Rate and next button
+        with col3:
+            if st.button("Rate & Next", key=f"rate_{current_index}"):
+                # Save rating
+                ratings_data[current_movie] = rating
+                save_user_data(ratings_file, ratings_data)
+                
+                # Add to watched list
+                if current_movie not in watchlist_data["watched"]:
+                    watchlist_data["watched"].append(current_movie)
+                    save_user_data(watchlist_file, watchlist_data)
+                
+                # Increment count of rated movies
+                st.session_state.onboarded_count += 1
+                
+                # Move to next movie
+                st.session_state.onboarding_index += 1
+                st.rerun()
+    
+    return False
 
 def add_to_watchlist(movie_title, watchlist_file):
     """Add a movie to the watchlist"""
