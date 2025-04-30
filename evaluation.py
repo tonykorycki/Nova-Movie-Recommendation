@@ -246,7 +246,7 @@ class RecommenderEvaluator:
         
         # Create a table of metrics for all recommenders
         recommender_names = list(results.keys())
-        metrics = ["precision", "recall", "f1_score", "hit_rate", "coverage", "diversity"]
+        metrics = ["precision", "recall", "f1_score", "hit_rate"]
         
         # Create a dataframe for the plot
         data = []
