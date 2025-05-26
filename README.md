@@ -12,7 +12,7 @@ Nova is a comprehensive movie recommendation system built with Streamlit that of
 - **Daily Movie Recommendations**: Get a new movie suggestion every day
 
 
-## 🎞 Demo Gallery
+## Demo Gallery
 
 A quick look at Nova’s Streamlit UI and key features:
 
