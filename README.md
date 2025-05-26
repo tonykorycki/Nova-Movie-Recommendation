@@ -11,6 +11,24 @@ Nova is a comprehensive movie recommendation system built with Streamlit that of
 - **Analytics & Insights**: Visualize movie data and your viewing preferences
 - **Daily Movie Recommendations**: Get a new movie suggestion every day
 
+
+## 🎞 Demo Gallery
+
+A quick look at Nova’s Streamlit UI and key features:
+
+| Front Page                 | Recommendations            |
+|:---------------------------|:---------------------------|
+| ![Front Page](demo/frontpage.png)           | ![Recommendations](demo/recommendations.png)       |
+
+| Similar Movies             | Movie of the Day           |
+|:---------------------------|:---------------------------|
+| ![Similar Movies](demo/similarmovies.png)   | ![Movie of the Day](demo/movieoftheday.png)       |
+
+| Model Insights             | Evaluation                 |
+|:---------------------------|:---------------------------|
+| ![Model Insights](demo/modelinsights.png)   | ![Evaluation](demo/evaluation.png)               |
+
+
 ## Installation
 
 ### Prerequisites

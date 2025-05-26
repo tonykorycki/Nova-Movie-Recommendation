@@ -6,25 +6,25 @@
     "hit_rate": 0.2,
     "coverage": 0.0020846362309776944,
     "diversity": 0.0,
-    "runtime": 0.31771388053894045
+    "runtime": 0.8736385822296142
   },
   "Enhanced Content-Based": {
-    "precision": 0.04,
-    "recall": 0.13333333333333333,
-    "f1_score": 0.06153846153846153,
-    "hit_rate": 0.4,
+    "precision": 0.06000000000000001,
+    "recall": 0.1619047619047619,
+    "f1_score": 0.08506787330316741,
+    "hit_rate": 0.6,
     "coverage": 0.0020846362309776944,
     "diversity": 0.0,
-    "runtime": 0.2614720821380615
+    "runtime": 0.7283373832702636
   },
   "Collaborative Filtering": {
-    "precision": 0.28,
+    "precision": 0.3,
     "recall": 0.6666666666666666,
-    "f1_score": 0.3873626373626374,
+    "f1_score": 0.40206851971557855,
     "hit_rate": 0.8,
     "coverage": 0.0020846362309776944,
     "diversity": 0.0,
-    "runtime": 0.023016929626464844
+    "runtime": 0.1142204761505127
   },
   "ML Recommender": {
     "precision": 0.02,
@@ -33,15 +33,15 @@
     "hit_rate": 0.2,
     "coverage": 0.0020846362309776944,
     "diversity": 0.0,
-    "runtime": 0.005621337890625
+    "runtime": 0.011621665954589844
   },
   "Matrix Factorization": {
-    "precision": 0.02,
-    "recall": 0.05,
-    "f1_score": 0.028571428571428574,
-    "hit_rate": 0.2,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1_score": 0.0,
+    "hit_rate": 0.0,
     "coverage": 0.0020846362309776944,
     "diversity": 0.0,
-    "runtime": 0.1399989604949951
+    "runtime": 0.46698770523071287
   }
 }

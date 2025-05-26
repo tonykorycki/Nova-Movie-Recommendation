@@ -244,6 +244,12 @@ class RecommenderEvaluator:
         if not results:
             raise ValueError("No results available for plotting")
         
+        # Exclude the matrix factorization model from the plot
+        results = {name: metrics for name, metrics in results.items() if name != "Matrix Factorization"}
+        
+        if not results:
+            raise ValueError("No valid results available for plotting after exclusion")
+        
         # Create a table of metrics for all recommenders
         recommender_names = list(results.keys())
         metrics = ["precision", "recall", "f1_score", "hit_rate"]

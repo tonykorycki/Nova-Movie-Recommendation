@@ -280,13 +280,13 @@ def main():
                 
                 # Let user select recommendation algorithm
                 algo_options = [
-                    "ML Recommender (Best)",
+                    "ML Recommender",
                     "Content-Based", 
                     "Collaborative Filtering",
-                    "Matrix Factorization",
                     "Popular Movies",  # Changed from "Demographic"
                     "Hybrid Recommendations"
                 ]
+                #"Matrix Factorization",
                 
                 recommender_type = st.selectbox(
                     "Choose a recommendation algorithm:",
